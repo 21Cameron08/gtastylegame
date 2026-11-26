@@ -5,7 +5,6 @@
 | # | Decision | Proposal | Alternatives |
 | --- | --- | --- | --- |
 | D1 | Engine | **Godot 4** (latest stable, pinned) | Unreal 5, Unity 6 |
-| D2 | Art style | **Stylized-realistic**: real proportions, simplified detail, strong lighting and color (achievable for a small team, ages well) | Photoreal (very expensive), low-poly (cheapest, less "GTA" feel) |
 | D3 | Platform | **PC first** (Windows + Linux) | Consoles later |
 | D4 | Asset sources | Blender (scripted + hand-made) plus CC0 placeholders (Kenney, Quaternius, Poly Haven) during prototyping | Paid asset packs |
 | D5 | Rating / tone | **Mature**: violence, crime, language; satire aimed at systems, not at locals | Toned down |
@@ -13,21 +12,19 @@
 
 ## Open questions
 
-1. **Blender setup**: which Blender version do you run? Do you want the live
-   connection (Blender MCP on your computer) or is the scripted mode enough to start?
-2. **Team**: is this solo (you + Claude), or are there other people (artists,
-   coders, musicians)?
-3. **Names**: keep or replace the working names (RED CLAY, Cane Creek, Bascom
-   County, Port Meridian, Trip Hollins, SaveMore)?
-4. **Real-world anchor**: should Cane Creek read as a specific state (Georgia,
-   the Carolinas, Alabama) or stay a generic Southeast?
-5. **Road-network authoring**: Blender curves exported to JSON, or a custom
+1. **Browser play**: should the game (or a demo) run in a web browser? This
+   affects the engine's renderer choice and asset budgets. See D1.
+2. **Road-network authoring**: Blender curves exported to JSON, or a custom
    Godot editor tool? (Decide in M0 after a quick prototype of each.)
-6. **Music**: original or commissioned music, or licensed tracks?
-7. **Hardware**: what GPU will you develop and test on? It sets the performance baseline.
+3. **Music**: original or commissioned music, or licensed tracks?
+4. **Hardware**: what GPU will you develop and test on? It sets the performance baseline.
 
 ## Decision log
 
 | Date | Decision | Notes |
 | --- | --- | --- |
-| 2026-11-26 | Plan drafted | Pending review |
+| 2026-11-26 | Plan drafted | |
+| 2026-11-26 | Art style: **stylized-realistic** | Real proportions, simplified detail, strong lighting and color |
+| 2026-11-26 | Team: **owner + Claude** | No other contributors for now |
+| 2026-11-26 | Blender: **Claude's headless Blender in the cloud** (scripted mode) | Upgrade from 4.0.2 to a current LTS and pin it during M0 |
+| 2026-11-26 | Names: **keep working names**; setting is a **generic fictional Southeastern state** | RED CLAY, Cane Creek, Bascom County, Port Meridian, Trip Hollins, SaveMore |
