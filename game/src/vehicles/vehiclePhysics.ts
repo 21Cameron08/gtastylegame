@@ -58,7 +58,7 @@ export class VehiclePhysics {
       .setRotation(yawQuat(yaw))
       .setCcdEnabled(true)
       .setCanSleep(false)
-      .setLinearDamping(0.05)
+      .setLinearDamping(0.02)
       .setAngularDamping(0.4)
       .setAdditionalMassProperties(
         m,
@@ -129,7 +129,8 @@ export class VehiclePhysics {
     let brake = 0;
     if (input.throttle > 0) {
       if (v < -1) brake = def.brakeForce * input.throttle;
-      else engine = def.engineForce * input.throttle * clamp01(1 - v / def.topSpeed);
+      // Quadratic fade: strong pull through the midrange, tapering near top speed.
+      else engine = def.engineForce * input.throttle * clamp01(1 - (v / def.topSpeed) ** 2);
     }
     if (input.brake > 0) {
       if (v > 1) brake = def.brakeForce * input.brake;

@@ -21,7 +21,7 @@ const IDLE: DriveInput = { throttle: 0, brake: 0, steer: 0, handbrake: false };
 function setup() {
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   world.timestep = DT;
-  world.createCollider(RAPIER.ColliderDesc.cuboid(500, 0.5, 500).setTranslation(0, -0.5, 0));
+  world.createCollider(RAPIER.ColliderDesc.cuboid(5000, 0.5, 5000).setTranslation(0, -0.5, 0));
   const car = new VehiclePhysics(RAPIER, world, PICKUP_WORK, LAYOUT, { x: 0, y: 0.3, z: 0 });
   const run = (seconds: number, input: DriveInput) => {
     for (let t = 0; t < seconds; t += DT) {
@@ -75,5 +75,33 @@ describe('VehiclePhysics', () => {
     run(1.5, { ...IDLE, throttle: 0.6, steer: 1 });
     expect(car.yaw).toBeGreaterThan(0.3);
     expect(car.body.translation().x).toBeGreaterThan(0.5);
+  });
+
+  it('pulls 0-60 mph in an arcade-truck window and tops out near 90 mph', () => {
+    const { car, run } = setup();
+    run(1, IDLE);
+    let t = 0;
+    while (car.speed < 26.8 && t < 20) {
+      run(DT, { ...IDLE, throttle: 1 });
+      t += DT;
+    }
+    expect(t).toBeGreaterThan(4);
+    expect(t).toBeLessThan(8);
+    run(20, { ...IDLE, throttle: 1 });
+    expect(car.speed * 2.237).toBeGreaterThan(80);
+    expect(car.speed * 2.237).toBeLessThan(105);
+  });
+
+  it('does not roll over at full lock at top speed', () => {
+    const { car, run } = setup();
+    run(1, IDLE);
+    run(12, { ...IDLE, throttle: 1 });
+    let minUp = 1;
+    for (let i = 0; i < 180; i++) {
+      run(DT, { ...IDLE, throttle: 0.5, steer: 1 });
+      const q = car.body.rotation();
+      minUp = Math.min(minUp, 1 - 2 * (q.x * q.x + q.z * q.z));
+    }
+    expect(minUp).toBeGreaterThan(0.5);
   });
 });
