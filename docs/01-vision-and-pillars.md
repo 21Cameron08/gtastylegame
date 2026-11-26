@@ -46,8 +46,8 @@ map, UI label and piece of art is original. Some examples of our own spin:
 
 ## Scope guardrails (v1)
 
-In: single-player, PC first, one fixed protagonist, the Cane Creek region (about
+In: single-player, browser first (desktop Chrome, Edge, Firefox), one fixed protagonist, the Cane Creek region (about
 9 km²), key interiors only (shops, safehouses, mission spaces).
 
-Out (for now): multiplayer, aircraft, full city playable area (Act 3 / later
+Out (for now): multiplayer, mobile, aircraft, full city playable area (Act 3 / later
 milestone), enterable interiors for every building, character creator.

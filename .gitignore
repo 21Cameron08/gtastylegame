@@ -1,8 +1,10 @@
-# Godot
-.godot/
-*.translation
-export_presets.cfg
-/build/
+# Node / web build
+node_modules/
+dist/
+.vite/
+coverage/
+playwright-report/
+test-results/
 
 # Blender backups
 *.blend1

@@ -1,79 +1,109 @@
 # 05 – Tech Architecture
 
-## Engine: Godot 4 (recommended)
+## Target: browser first
 
-| | Godot 4 | Unreal 5 | Unity 6 |
-| --- | --- | --- | --- |
-| Cost | Free, MIT license | 5% royalty past $1M | Subscription tiers |
-| Scenes and data in git | **Text** (`.tscn`, `.tres`): diffable, easy to edit by script or AI | Binary `.uasset` | YAML, hard to diff |
-| Blender pipeline | Native glTF and `.blend` import, name-suffix import hints | FBX/glTF via plugins | FBX/glTF |
-| Open-world tooling | Build our own streaming (moderate work) | Best in class (World Partition) | Middle |
-| Iteration speed | Fast; small editor; GDScript hot reload | Slow compiles, heavy editor | Medium |
-| Hardware needs | Low | High | Medium |
+- **Play from a link, no install.** Desktop Chrome, Edge, and Firefox (current
+  versions). Safari is best effort. Mobile is out of scope for v1.
+- Keyboard and mouse (Pointer Lock API) plus gamepad (Gamepad API).
+- A desktop app can come later by wrapping the same code (Electron or Tauri).
 
-**Why Godot**: everything stays as text in git, so changes to scenes, missions,
-and data can be scripted, reviewed, and generated (including by Claude). The
-Blender → Godot path is the smoothest of the three. The cost is that we build
-our own world streaming, which is well understood work at our map size.
+## Stack
 
-Version: latest **Godot 4.x stable** at project start, pinned in
-`project.godot` and CI. Physics: **Jolt** (built into Godot 4.4+).
-Language: **GDScript** first; C# or GDExtension (C++) only for hot spots that
-profiling proves need it.
+| Layer | Choice | Why |
+| --- | --- | --- |
+| Language | **TypeScript** | Type safety across a large codebase |
+| Build / dev server | **Vite** | Instant reload in development, small production bundles |
+| Rendering | **Three.js `WebGPURenderer`** | WebGPU where the browser has it, automatic WebGL 2 fallback; one shader language (TSL) for both |
+| Physics | **Rapier** (`@dimforge/rapier3d-compat`, WebAssembly) | Built-in ray-cast vehicle controller and kinematic character controller; fast |
+| Navigation | **recast-navigation-js** | Navmeshes for pedestrians and police on foot |
+| Audio | **Web Audio** (via Three.js positional audio) | 3D engine and gun sounds, radio stations |
+| UI | **HTML/CSS overlay** (plain DOM, Preact if it grows) | HUD, map, phone, and menus are easier and sharper as web UI |
+| Assets | **glTF 2.0 (`.glb`)**, meshopt-compressed geometry, KTX2 textures | Small downloads, low GPU memory |
+| Tests | **Vitest** (game logic), **Playwright** (in-browser smoke and screenshot tests) | Both run in CI and in Claude's cloud environment |
+
+**WebGPU vs. WebGL 2**: every build must work on both. Anything
+gameplay-critical avoids WebGPU-only features such as compute shaders.
+WebGPU-only extras are allowed as optional quality settings.
 
 ## Project layout (planned)
 
 ```
 game/
-  project.godot
-  core/          Autoloads: GameState, EventBus, SaveSystem, TimeOfDay, Economy, Heat
-  player/        Character controller, camera rigs, animation tree
-  vehicles/      Vehicle controller, vehicle definitions (.tres), audio
-  weapons/       Weapon logic, weapon definitions (.tres)
-  npc/           Pedestrian AI, reactions, spawner
-  traffic/       Lane graph, traffic AI, signals
-  missions/      Mission framework + one folder per mission
-  economy/       Shops, financing, credit, properties
-  ui/            HUD, minimap, phone, menus
-  world/         Cell scenes, streamer, road network, skyline backdrop
-  assets/        Imported .glb, textures, audio (Git LFS)
+  index.html
+  package.json, vite.config.ts, tsconfig.json
+  src/
+    main.ts        Boot, renderer setup, game loop
+    core/          Event bus, input, save, time of day, settings
+    render/        Materials, sky and weather, post-processing, LOD
+    physics/       Rapier world, collider building from glTF
+    world/         Cell streamer, road network, skyline backdrop
+    player/        Character controller, camera rigs, animation
+    vehicles/      Vehicle controller, damage, vehicle audio
+    weapons/       Weapon logic, projectiles, hit reactions
+    npc/           Pedestrian AI, reactions, spawning
+    traffic/       Lane graph, traffic AI, signals
+    heat/          Police response and pursuit
+    economy/       Shops, financing, credit score, properties
+    missions/      Mission framework + one folder per mission
+    audio/         Mixer, radio stations
+    ui/            HUD, minimap, map, phone, menus (DOM)
+  data/            Vehicle, weapon, shop, property, mission definitions
+  public/assets/   Compressed .glb, .ktx2, audio (Git LFS)
+  tests/           Vitest unit tests
+  e2e/             Playwright browser tests
 blender/
-  src/           .blend source files (Git LFS)
-  scripts/       bpy generators, batch exporters, validators
-tools/           CI scripts, headless import/test runners
+  src/             .blend source files (Git LFS)
+  scripts/         bpy generators, exporters, validators
+tools/             Asset compression, CI helpers
 ```
 
 ## Core architecture
 
-- **Autoload singletons** for global state (`GameState`, `EventBus`, `Economy`,
-  `Heat`, `TimeOfDay`, `SaveSystem`). Systems talk through `EventBus` signals,
-  not direct references.
-- **Data-driven definitions** as Godot Resources: `VehicleDef`, `WeaponDef`,
-  `ShopItemDef`, `PropertyDef`, `MissionDef`. Designers tune `.tres` files, not code.
-- **Mission framework**: `MissionDef` lists objectives built from a library of
-  objective types (GoTo, DriveTo, Chase, Kill, Escort, Collect, Deliver,
-  SurviveHeat, Timer, Dialogue). Each mission can attach a script for bespoke logic.
-- **Save system**: JSON snapshot of `GameState` (money, credit, owned vehicles
-  and properties, mission flags, time, weather, position).
+- **Game loop**: fixed 60 Hz simulation step (physics, AI, gameplay) with
+  rendering at the display's refresh rate, interpolated between steps.
+- **Systems + event bus**: each system (Heat, Economy, Traffic, Missions, ...)
+  is a module with an `update(dt)`. Systems talk through a typed event bus, not
+  direct references.
+- **Entities**: a lightweight entity-component setup for things that come in
+  numbers (pedestrians, traffic, projectiles, pickups). The player and the
+  driven vehicle are plain classes on top of it.
+- **Data-driven definitions**: vehicles, weapons, shop items, properties, and
+  missions are typed data files, validated at build time. Tuning a car means
+  editing data, not code.
+- **Mission framework**: each mission is a list of objectives built from a
+  shared library (GoTo, DriveTo, Chase, Kill, Escort, Collect, Deliver,
+  SurviveHeat, Timer, Dialogue), plus an optional script for bespoke logic.
+- **Save system**: stored in the browser's IndexedDB, with export/import to a
+  file so saves can't be lost by clearing browser data. Autosave after missions.
+- **Settings**: quality presets (shadows, draw distance, traffic density,
+  resolution scale), auto-picked by a quick benchmark on first launch.
 
 ## World streaming
 
-The map is split into a grid of **cells (250 m × 250 m)**. Each cell is its own
-scene containing terrain, buildings, props, and spawn points.
+The map is split into **250 m × 250 m cells**. Each cell is made of:
 
-- A `WorldStreamer` loads cells within a radius of the player using
-  `ResourceLoader.load_threaded_request`, and unloads cells that fall out of range.
-- **Far LOD**: each cell has a merged low-poly "HLOD" mesh shown beyond the
-  streaming radius, using Godot visibility ranges.
-- **Skyline**: Port Meridian is a single impostor mesh at the horizon until Act 3.
-- **Precision**: at about 3 × 3 km, single-precision floats are fine. If the
-  playable world grows past roughly 8 km across, revisit (origin shifting or a
-  double-precision build).
+1. A `.glb` with its unique geometry (terrain, roads, one-off structures)
+2. A placement manifest (JSON) listing kit and prop instances: asset ID + transform
+3. Collider data and gameplay markers (spawns, doors, mission points)
+
+**Shared kits** (brick storefronts, houses, props, trees) download once and are
+reused by every cell as instanced meshes, so each cell's own download stays small.
+
+- Cells load in a ring around the player, prioritized by direction and speed of
+  travel. Far cells are unloaded and their GPU memory released (browsers punish leaks).
+- **Far LOD**: each cell has a merged low-poly mesh shown beyond the load ring.
+- **Skyline**: Port Meridian is one impostor mesh on the horizon until Act 3.
+- Texture and mesh decoding runs in Web Workers so streaming doesn't stutter.
+- The browser cache (later a service worker) keeps returning players from
+  downloading everything again.
+- **Download budgets**: playable after ≤ 25 MB; a typical cell ≤ 2 MB.
+- **Precision**: at about 3 × 3 km, 32-bit floats are fine.
 
 ## Road network (single source of truth)
 
-Roads are authored once as a graph (nodes = intersections, edges = road segments
-with lane counts and speed limits). From that one dataset we generate:
+Roads are authored in **Blender** as a curve/edge graph (nodes = intersections,
+edges = segments with lane counts and speed limits). An export script writes the
+graph to JSON and generates the road meshes. From that one dataset we get:
 
 1. Road meshes, sidewalks, and markings
 2. The traffic lane graph and intersection rules
@@ -81,21 +111,24 @@ with lane counts and speed limits). From that one dataset we generate:
 4. Pedestrian navigation along sidewalks
 5. Police dispatch routes
 
-Authoring tool (Blender curves vs. a Godot editor plugin) is decided in
-milestone M0; see [08](08-decisions.md).
-
 ## Performance targets
 
-- 60 fps at 1080p on a mid-range PC (GTX 1660 / RTX 2060 class).
-- Shared trim-sheet and palette materials so many objects batch together.
-- `MultiMeshInstance3D` for trees, grass, fences, power poles.
-- Godot's built-in occlusion culling in town; auto-generated mesh LODs on import.
-- Budget: ≤ 40 traffic vehicles and ≤ 60 pedestrians active near the player.
+- **60 fps at 1080p** in Chrome on a mid-range desktop GPU (GTX 1660 / RTX 2060 class).
+- **30+ fps** on integrated laptop graphics at the Low preset.
+- Under ~1,000 draw calls per frame (instancing, shared trim-sheet materials).
+- ≤ 30 traffic vehicles and ≤ 40 pedestrians active near the player.
+- ≤ 1.5 GB GPU memory at the High preset.
 
-## Testing & CI
+## Build, test, deploy
 
-- Headless Godot in CI: import every asset, run unit tests (GUT or gdUnit4),
-  load each world cell, and fail on errors.
-- Headless Blender in CI: run asset validators (naming, scale, triangle budgets)
-  and re-export changed `.blend` files.
-- Git LFS for binaries; `.godot/` cache is never committed.
+- **CI (GitHub Actions)** on every push:
+  - Typecheck and Vitest unit tests
+  - Production build
+  - Playwright smoke test in headless Chromium: the game boots, renders, drives a
+    scripted route, and logs no errors (runs on the WebGL 2 path)
+  - Headless Blender asset validation, then compression with glTF-Transform
+- **Deploy**: each push to the main branch publishes a playable build at a link.
+  CI checks out Git LFS files so the site gets real assets, not LFS pointers.
+- **Hosting**: decided in M0 (GitHub Pages if the repo is public, otherwise
+  itch.io or Cloudflare Pages). The build is single-threaded, so no special
+  server headers are needed.

@@ -1,28 +1,31 @@
 # 07 – Roadmap
 
-Each milestone ends with a playable build and a clear "done when." Later
-milestones get re-planned once the earlier ones teach us how fast we actually move.
+Each milestone ends with a **playable build at a link** and a clear "done when."
+Later milestones get re-planned once the earlier ones teach us how fast we
+actually move.
 
 ## M0: Foundation
 Set up the tools so everything after this is fast.
-- Godot project, folder structure, autoload skeletons
-- Blender scripts: export, validate, first modular-kit generator
-- Git LFS, CI (headless Godot import and tests, Blender validation)
-- Decide the road-network authoring tool
+- Vite + TypeScript + Three.js + Rapier project with a test scene
+- Game loop, input, event bus, settings skeleton
+- Blender scripts: export, validate, compress, cell manifest export, first
+  modular-kit generator; upgrade and pin Blender LTS
+- Git LFS, CI (typecheck, tests, build, Playwright smoke test), deploy to hosting
+- Prototype road-network authoring in Blender
 - Greybox test map: flat terrain, a few boxes, one road loop
 
-**Done when**: a scripted Blender asset lands in a running Godot scene through
-CI with no manual steps.
+**Done when**: a scripted Blender asset shows up in the game at a public link,
+through CI, with no manual steps.
 
 ## M1: Walk & Drive
 The two feelings everything else rests on.
 - Third-person character controller and camera
 - Vehicle controller (pickup + sedan), enter/exit, surfaces (asphalt, dirt, grass)
 - Greybox Downtown Square and the Bypass at true scale
-- Day/night cycle, basic minimap
+- Day/night cycle, basic minimap, quality presets
 
 **Done when**: driving a pickup around the square and down a dirt road is fun
-for 10 minutes with nothing else to do.
+for 10 minutes with nothing else to do, at 60 fps in Chrome on a mid-range PC.
 
 ## M2: Guns & Heat
 - Pistol, shotgun, bat; health and armor; weapon wheel
@@ -42,11 +45,12 @@ One small piece of the game at near-final quality.
 - Missions 1–5 from Act 1
 - Two radio stations, Port Meridian skyline on the horizon
 
-**Done when**: a new player can play 45 minutes, understand the game, and want more.
+**Done when**: a new player can open the link, play 45 minutes, understand the
+game, and want more.
 
 ## M4: Cane Creek Complete (~9 km²)
 - All districts and the outskirts (procedural forest/farm scatter)
-- World streaming and HLODs
+- Full cell streaming and far LODs
 - All of Act 1 plus side activities: repo jobs, moonshine runs, racing, DashDash
 - More vehicles and weapons, mod shop, properties
 
@@ -65,8 +69,9 @@ One small piece of the game at near-final quality.
 
 **Done when**: the game is playable start to finish.
 
-## First concrete steps (after the plan is approved)
-1. Lock decisions in [08](08-decisions.md): engine, art style, Blender version, names.
-2. Create the Godot project skeleton and the `blender/scripts/` export and validate scripts.
-3. Generate the first modular kit (brick downtown storefronts) and import it.
+## First concrete steps
+1. Scaffold the web project (Vite, TypeScript, Three.js, Rapier) with a test
+   scene, CI, and a deployed link.
+2. Write the Blender export, validate, and compress scripts.
+3. Generate the first modular kit (brick downtown storefronts) and load it in game.
 4. Greybox the square and start the vehicle controller.

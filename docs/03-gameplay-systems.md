@@ -15,8 +15,8 @@ comes after). The roadmap in [07](07-roadmap.md) orders them.
 
 ## 3. Vehicles
 Driving has to feel good before anything else ships.
-- **MVP**: custom raycast-suspension vehicle controller (arcade-leaning: forgiving
-  grip, handbrake slides on dirt), surface types (asphalt, dirt, grass, mud),
+- **MVP**: ray-cast vehicle controller (Rapier) tuned arcade-leaning: forgiving
+  grip, handbrake slides on dirt; surface types (asphalt, dirt, grass, mud),
   one pickup truck and one sedan, basic damage (smoke, then fire, then explode),
   engine audio.
 - **Later**: vehicle classes below, visual deformation, tire popping, mod shop
@@ -115,4 +115,5 @@ Money is the core loop: earn it, spend it, owe it.
 ## 11. World simulation
 - Day/night cycle (1 in-game day ≈ 48 real minutes; tunable), weather states,
   shop opening hours.
-- Save at safehouses and Dot's Diner; autosave after missions.
+- Save at safehouses and Dot's Diner; autosave after missions. Saves live in the
+  browser, with export/import to a file as a backup.
