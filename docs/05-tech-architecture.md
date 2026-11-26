@@ -54,7 +54,7 @@ game/
 blender/
   src/             .blend source files (Git LFS)
   scripts/         bpy generators, exporters, validators
-tools/             Asset compression, CI helpers
+game/scripts/      Asset build: Blender generators -> compressed .glb
 ```
 
 ## Core architecture
@@ -121,12 +121,17 @@ graph to JSON and generates the road meshes. From that one dataset we get:
 
 ## Build, test, deploy
 
-- **CI (GitHub Actions)** on every push:
-  - Typecheck and Vitest unit tests
+- **CI (GitHub Actions)** on every push (`.github/workflows/ci.yml`):
+  - Headless Blender runs every asset generator, validates, and compresses with glTF-Transform
+  - Typecheck and Vitest unit tests (including vehicle physics in Node)
   - Production build
-  - Playwright smoke test in headless Chromium: the game boots, renders, drives a
-    scripted route, and logs no errors (runs on the WebGL 2 path)
-  - Headless Blender asset validation, then compression with glTF-Transform
+  - Playwright smoke tests in headless Chromium, once on WebGPU and once on the
+    forced WebGL 2 fallback: the game boots, renders, drives, and logs no errors
+- **Testing WebGPU without a GPU**: headless screenshots can't see a WebGPU
+  canvas, so the game exposes `window.__game.capture()`, which renders the view
+  offscreen and returns a PNG. On Chromium's software WebGPU adapter (CI) pixel
+  readback is unreliable, so CI checks pixels on WebGL 2 and boot/drive/errors on
+  WebGPU; WebGPU pixels are checked where a GPU is available (`WEBGPU_READBACK=1`).
 - **Deploy**: each push to the main branch publishes a playable build at a link.
   CI checks out Git LFS files so the site gets real assets, not LFS pointers.
 - **Hosting**: decided in M0 (GitHub Pages if the repo is public, otherwise

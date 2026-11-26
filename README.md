@@ -4,7 +4,26 @@ An original open-world crime game set in a small Southeastern US town, with a
 mid-size city on the horizon. Plays in the browser. Cars, guns, missions, and a satirical take on
 consumerism and debt.
 
-> Status: **planning / pre-production**. Nothing playable yet.
+> Status: **M0 (foundation)**. A drivable greybox of the Cane Creek courthouse
+> square, with scripted Blender buildings and a scripted pickup truck.
+>
+> **Play**: https://21cameron08.github.io/gtastylegame/ (desktop Chrome, Edge, or Firefox)
+
+## Run it locally
+
+Requires Node 22+ and Blender 4.0 on your `PATH` (or set `BLENDER=/path/to/blender`).
+
+```bash
+cd game
+npm install
+npm run assets   # build Blender assets into public/assets/
+npm run dev      # open the printed URL
+```
+
+Checks: `npm run typecheck`, `npm test` (unit), `npm run e2e` (browser; run `npx vite build` first).
+
+Debug URL options: `?renderer=webgl` forces the WebGL 2 fallback;
+`?cam=x,y,z,lookX,lookY,lookZ` pins the camera.
 
 ## Plan documents
 
@@ -25,8 +44,8 @@ consumerism and debt.
 blender/      Blender source files (.blend) and Python generator/export scripts
 game/         Browser game: Three.js + TypeScript + Rapier, built with Vite
 docs/         Design and technical documentation
-tools/        CI and helper scripts
+.github/      CI: build assets, test, deploy to GitHub Pages
 ```
 
-Binary assets (`.blend`, `.glb`, textures, audio) are stored with **Git LFS**;
-see `.gitattributes`.
+Scripted assets are build outputs and are not committed. Hand-made binary
+assets (`.blend`, textures, audio) are stored with **Git LFS**; see `.gitattributes`.

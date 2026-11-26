@@ -4,12 +4,20 @@ Each milestone ends with a **playable build at a link** and a clear "done when."
 Later milestones get re-planned once the earlier ones teach us how fast we
 actually move.
 
-## M0: Foundation
+## M0: Foundation (in progress)
 Set up the tools so everything after this is fast.
+
+Done so far: web project, game loop, input, drivable pickup (Rapier ray-cast
+vehicle), chase camera, greybox courthouse square, two Blender generators
+(storefronts, pickup) with validation and compression, unit and browser tests,
+CI with GitHub Pages deploy. Remaining: cell manifest export, road-network
+authoring prototype, settings skeleton.
+
+Scope:
 - Vite + TypeScript + Three.js + Rapier project with a test scene
 - Game loop, input, event bus, settings skeleton
 - Blender scripts: export, validate, compress, cell manifest export, first
-  modular-kit generator; upgrade and pin Blender LTS
+  modular-kit generator; pin the Blender version
 - Git LFS, CI (typecheck, tests, build, Playwright smoke test), deploy to hosting
 - Prototype road-network authoring in Blender
 - Greybox test map: flat terrain, a few boxes, one road loop

@@ -16,8 +16,9 @@ commit it back.
 Scripts are versioned and repeatable, and they run in CI. A smoke test (script
 builds a mesh with a collision hull and exports `.glb`) already passes.
 
-**Blender version**: the cloud environment has Blender 4.0.2. During M0 we
-upgrade to a current LTS release and pin it for scripts and CI.
+**Blender version**: pinned to **4.0.2**, Ubuntu 24.04's package. It's what
+the cloud environment can install (blender.org downloads are blocked there) and
+what CI installs, so local and CI builds match. Upgrading means changing both.
 
 ## Division of labor
 
@@ -44,7 +45,9 @@ upgrade to a current LTS release and pin it for scripts and CI.
 - **Forward**: models face **−Y** in Blender (the Front view, Numpad 1, shows
   the front). That becomes +Z in glTF, the standard glTF forward direction.
 - **Origins**:
-  - Props and buildings: bottom center (sits on the ground at Z = 0)
+  - Props and freestanding buildings: bottom center (sits on the ground at Z = 0)
+  - Street-facing buildings: bottom center of the street facade, so facades line
+    up on the sidewalk edge whatever the building's depth
   - Vehicles: ground level, centered between the axles
   - Wheels: hub center
   - Characters: between the feet
@@ -164,11 +167,17 @@ The validator flags anything over budget.
 
 ## Export pipeline
 
-1. `blender -b blender/src/<file>.blend -P blender/scripts/export.py -- <args>`
-   exports `.glb` with custom properties included.
-2. glTF-Transform compresses it: meshopt geometry, KTX2 textures, deduplication.
-3. Output lands in `game/public/assets/`. `.blend` sources and compressed
-   `.glb` files are both committed (Git LFS), so the game builds without Blender.
+`npm run assets` (in `game/`) runs `game/scripts/build-assets.mjs`:
+
+1. Every `blender/scripts/generators/gen_*.py` runs in headless Blender. Each
+   builds its assets, validates them, and exports `.glb` with custom properties.
+2. glTF-Transform compresses each file: meshopt geometry, deduplication
+   (KTX2 textures once assets have textures).
+3. Output lands in `game/public/assets/<category>/`.
+
+Scripted assets are **build outputs**: generated locally and in CI, never
+committed. Hand-authored `.blend` files will live in `blender/src/` (Git LFS) and
+be exported by the same build step once the first one exists.
 
 ## Validation (runs in CI)
 
