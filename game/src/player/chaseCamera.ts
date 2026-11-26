@@ -8,8 +8,15 @@ export class ChaseCamera {
   private readonly desired = new THREE.Vector3();
   private readonly look = new THREE.Vector3();
   private initialized = false;
+  private blendIn = false;
 
   constructor(readonly camera: THREE.PerspectiveCamera) {}
+
+  /** Take over from wherever the camera is now (e.g. after getting in), easing into place. */
+  begin(): void {
+    this.initialized = false;
+    this.blendIn = true;
+  }
 
   update(dt: number, target: THREE.Vector3, rotation: THREE.Quaternion, speed: number): void {
     // Heading on the ground plane, smoothed so bumps don't shake the camera.
@@ -27,6 +34,12 @@ export class ChaseCamera {
     this.desired.y = Math.max(this.desired.y, target.y + 1.2, 0.6);
 
     const lookTarget = target.clone().addScaledVector(UP, 1.4).addScaledVector(this.forward, 3);
+    if (!this.initialized && this.blendIn) {
+      this.look.copy(this.camera.position).add(this.camera.getWorldDirection(new THREE.Vector3()).multiplyScalar(8));
+      if (heading.lengthSq() > 1e-4) this.forward.copy(heading);
+      this.initialized = true;
+      this.blendIn = false;
+    }
     if (!this.initialized) {
       this.camera.position.copy(this.desired);
       this.look.copy(lookTarget);

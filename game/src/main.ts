@@ -2,15 +2,19 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three/webgpu';
 import { Input } from './core/input';
 import { FixedStepper } from './core/loop';
+import { Character } from './player/character';
 import { ChaseCamera } from './player/chaseCamera';
+import { OrbitCamera } from './player/orbitCamera';
+import { Player, type PlayerMode } from './player/player';
 import { captureFrame } from './render/capture';
 import { Environment } from './render/environment';
 import { createRenderer, fitToWindow } from './render/renderer';
 import { Hud } from './ui/hud';
 import { Vehicle } from './vehicles/vehicle';
 import { PICKUP_WORK } from './vehicles/vehicleDefs';
-import type { DriveInput } from './vehicles/vehiclePhysics';
 import { TestMap } from './world/testMap';
+
+type Vec = { x: number; y: number; z: number };
 
 /** Read-only hooks for automated browser tests (e2e/). */
 interface DebugHooks {
@@ -18,7 +22,9 @@ interface DebugHooks {
   error: string | null;
   backend: string | null;
   frames: number;
-  vehicle: { x: number; y: number; z: number; speedMph: number } | null;
+  mode: PlayerMode | null;
+  player: Vec | null;
+  vehicle: (Vec & { speedMph: number }) | null;
   /** Offscreen render of the current view as a PNG data URL (works on WebGPU in headless browsers). */
   capture: (width?: number, height?: number) => Promise<string>;
 }
@@ -27,6 +33,8 @@ const debug: DebugHooks = {
   error: null,
   backend: null,
   frames: 0,
+  mode: null,
+  player: null,
   vehicle: null,
   capture: () => Promise.reject(new Error('game not started')),
 };
@@ -54,15 +62,18 @@ async function boot(): Promise<void> {
   world.timestep = stepper.step;
 
   const map = await TestMap.build(RAPIER, world, scene);
-  const truck = await Vehicle.create(RAPIER, world, scene, PICKUP_WORK, map.spawn);
-  const input = new Input();
-  const chase = new ChaseCamera(camera);
+  const [truck, trip] = await Promise.all([
+    Vehicle.create(RAPIER, world, scene, PICKUP_WORK, map.vehicleSpawn),
+    Character.create(RAPIER, world, scene, map.playerSpawn),
+  ]);
+  const input = new Input(window, canvas);
+  const orbit = new OrbitCamera(camera, RAPIER, world);
+  orbit.yaw = map.playerSpawn.yaw + Math.PI; // start behind Trip, looking the way he faces
+  const player = new Player(RAPIER, world, trip, truck, new ChaseCamera(camera), orbit, input, hud);
+
   // ?cam=x,y,z,lookX,lookY,lookZ pins the camera (screenshots, scene review).
   const pinned = params.get('cam')?.split(',').map(Number);
-  if (pinned && pinned.length === 6 && pinned.every(Number.isFinite)) {
-    camera.position.set(pinned[0], pinned[1], pinned[2]);
-    camera.lookAt(pinned[3], pinned[4], pinned[5]);
-  }
+  const camPinned = !!pinned && pinned.length === 6 && pinned.every(Number.isFinite);
   hud.setStatus('');
   debug.capture = (width, height) => captureFrame(renderer, scene, camera, width, height);
 
@@ -72,33 +83,31 @@ async function boot(): Promise<void> {
     const frame = Math.min((now - last) / 1000, 0.25);
     last = now;
 
-    if (input.wasPressed('KeyR')) truck.reset();
-    if (input.wasPressed('Backspace')) truck.respawn();
     if (input.wasPressed('KeyH')) hud.toggleHelp();
-    const drive: DriveInput = {
-      throttle: input.isDown('KeyW', 'ArrowUp') ? 1 : 0,
-      brake: input.isDown('KeyS', 'ArrowDown') ? 1 : 0,
-      steer: input.axis(['KeyD', 'ArrowRight'], ['KeyA', 'ArrowLeft']),
-      handbrake: input.isDown('Space'),
-    };
-
+    player.frame();
     const alpha = stepper.advance(frame, (dt) => {
-      truck.beforeStep(drive, dt);
+      player.fixedStep(dt);
       world.step();
-      truck.afterStep();
+      player.afterStep();
       map.afterStep();
     });
-    truck.render(alpha, frame);
+    player.render(alpha, frame);
     map.render(alpha);
-    if (!pinned) chase.update(frame, truck.position, truck.quaternion, truck.speed);
-    env.follow(truck.position, camera);
+    if (camPinned) {
+      camera.position.set(pinned[0], pinned[1], pinned[2]);
+      camera.lookAt(pinned[3], pinned[4], pinned[5]);
+    }
+    env.follow(camPinned ? new THREE.Vector3(pinned[3], 0, pinned[5]) : player.focus, camera);
     hud.update(frame, truck.speed, backend);
     renderer.render(scene, camera);
     input.endFrame();
 
     debug.frames++;
-    const p = truck.position;
-    debug.vehicle = { x: p.x, y: p.y, z: p.z, speedMph: Math.abs(truck.speed) * 2.23694 };
+    debug.mode = player.mode;
+    const c = trip.position;
+    debug.player = { x: c.x, y: c.y, z: c.z };
+    const v = truck.position;
+    debug.vehicle = { x: v.x, y: v.y, z: v.z, speedMph: Math.abs(truck.speed) * 2.23694 };
     debug.ready = true;
   });
 }

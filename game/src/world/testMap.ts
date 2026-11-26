@@ -2,16 +2,42 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import * as THREE from 'three/webgpu';
 import { BodySync } from '../physics/bodySync';
 import { addStaticColliders, instantiate, loadTemplate } from './assets';
+import { addInstanceColliders, instanceTemplate, markerPositions, placementMatrix, seededRandom } from './placement';
+import { buildPowerLines } from './powerLines';
 
 type Rapier = typeof RAPIER;
 
 /**
- * M0 greybox: a courthouse square ringed by scripted storefronts, a road north
- * to a SaveMore lot, a red clay dirt road west with a jump, and the Port
- * Meridian skyline in the haze. Placeholder geometry until real kits exist.
+ * M0 greybox of Cane Creek: the courthouse square ringed by storefronts, a road
+ * north to the SaveMore lot, a red clay county road west with a jump, pine woods,
+ * the water tower, and the Port Meridian skyline in the haze.
+ *
+ * Buildings, trees, poles, and the skyline are Blender assets (blender/scripts/
+ * generators). Roads, sidewalks, the lawn, the ramp, and the crates are still
+ * built here until the road network moves to Blender.
  *
  * Coordinates: meters, +Y up. The square's road loop centerline is x = ±60, z = ±40.
  */
+
+const ASSETS = {
+  storeA: 'assets/buildings/BLD_Storefront_8m_A.glb',
+  storeB: 'assets/buildings/BLD_Storefront_8m_B.glb',
+  storeC: 'assets/buildings/BLD_Storefront_12m_C.glb',
+  storeD: 'assets/buildings/BLD_Storefront_8m_D.glb',
+  courthouse: 'assets/buildings/BLD_Courthouse.glb',
+  waterTower: 'assets/buildings/BLD_WaterTower.glb',
+  saveMore: 'assets/buildings/BLD_SaveMore.glb',
+  oakA: 'assets/foliage/FOL_LiveOak_A.glb',
+  oakB: 'assets/foliage/FOL_LiveOak_B.glb',
+  pineA: 'assets/foliage/FOL_Pine_A.glb',
+  pineB: 'assets/foliage/FOL_Pine_B.glb',
+  pole: 'assets/props/PRP_PowerPole.glb',
+  skyline: 'assets/skyline/SKY_PortMeridian.glb',
+} as const;
+type AssetKey = keyof typeof ASSETS;
+
+const STORE_WIDTH: Record<'storeA' | 'storeB' | 'storeC' | 'storeD', number> = { storeA: 8, storeB: 8, storeC: 12, storeD: 8 };
+const ROW_PATTERN = ['storeA', 'storeB', 'storeD', 'storeC', 'storeB', 'storeA', 'storeC', 'storeD'] as const;
 
 const COLORS = {
   grass: '#6c7642',
@@ -19,18 +45,11 @@ const COLORS = {
   asphalt: '#3a3b3d',
   asphaltLot: '#45464a',
   line: '#d9b23a',
+  stall: '#e8e4d8',
   sidewalk: '#b9b4a8',
   clay: '#a4552f',
-  courthouse: '#e8e0cc',
-  courthouseRoof: '#5b6b62',
-  trunk: '#5a4632',
-  canopy: '#3e5a2c',
-  tower: '#d7dadc',
-  pole: '#6b5440',
+  ramp: '#7a6a55',
   crate: '#b08a5a',
-  skyline: '#8e99a6',
-  saveMore: '#d9dde2',
-  saveMoreBand: '#1f5fae',
 } as const;
 
 const materials = new Map<string, THREE.MeshStandardMaterial>();
@@ -44,25 +63,27 @@ function mat(color: string, roughness = 0.9): THREE.MeshStandardMaterial {
   return m;
 }
 
-const BUILDING_MODELS = {
-  A: 'assets/buildings/BLD_Storefront_8m_A.glb',
-  B: 'assets/buildings/BLD_Storefront_8m_B.glb',
-  C: 'assets/buildings/BLD_Storefront_12m_C.glb',
-  D: 'assets/buildings/BLD_Storefront_8m_D.glb',
-} as const;
-const BUILDING_WIDTH: Record<keyof typeof BUILDING_MODELS, number> = { A: 8, B: 8, C: 12, D: 8 };
-const ROW_PATTERN: (keyof typeof BUILDING_MODELS)[] = ['A', 'B', 'D', 'C', 'B', 'A', 'C', 'D'];
-
-interface DynamicProp {
-  sync: BodySync;
-}
+/** Keep scattered trees off roads, lots, and buildings. */
+const CLEARINGS: [number, number, number, number][] = [
+  [-130, 130, -60, 60],      // downtown and the square
+  [-12, 12, -215, -40],      // north road
+  [-100, 100, -410, -205],   // SaveMore and its lot
+  [-480, -120, -12, 16],     // county road and power line
+  [-170, -130, -110, -70],   // water tower
+  [-480, -430, -40, 40],     // turnaround
+];
+const inClearing = (x: number, z: number) => CLEARINGS.some(([x0, x1, z0, z1]) => x >= x0 && x <= x1 && z >= z0 && z <= z1);
 
 export class TestMap {
-  readonly spawn = { position: new THREE.Vector3(-92, 0.4, 0), yaw: Math.PI / 2 };
-  private readonly props: DynamicProp[] = [];
+  /** Where the truck starts, facing the square along the county road. */
+  readonly vehicleSpawn = { position: new THREE.Vector3(-92, 0.4, 0), yaw: Math.PI / 2 };
+  /** Where Trip starts: beside the truck's driver door, facing the square. */
+  readonly playerSpawn = { position: new THREE.Vector3(-90.5, 1.0, -2.8), yaw: Math.PI / 2 };
+  private readonly props: BodySync[] = [];
+  private templates = {} as Record<AssetKey, THREE.Group>;
   buildingCount = 0;
 
-  constructor(
+  private constructor(
     private readonly R: Rapier,
     private readonly world: RAPIER.World,
     private readonly scene: THREE.Scene,
@@ -70,27 +91,49 @@ export class TestMap {
 
   static async build(R: Rapier, world: RAPIER.World, scene: THREE.Scene): Promise<TestMap> {
     const map = new TestMap(R, world, scene);
+    const entries = await Promise.all(
+      (Object.keys(ASSETS) as AssetKey[]).map(async (k) => [k, await loadTemplate(ASSETS[k])] as const),
+    );
+    map.templates = Object.fromEntries(entries) as Record<AssetKey, THREE.Group>;
     map.ground();
     map.roads();
     map.square();
+    map.downtownRows();
     map.westOutskirts();
+    map.woods();
     map.northToSaveMore();
     map.skyline();
-    await map.downtownRows();
     return map;
   }
 
   afterStep(): void {
-    for (const p of this.props) p.sync.capture();
+    for (const p of this.props) p.capture();
   }
 
   render(alpha: number): void {
-    for (const p of this.props) p.sync.apply(alpha);
+    for (const p of this.props) p.apply(alpha);
   }
 
   // ---------------------------------------------------------------- helpers
 
-  /** Box from min/max corners on the ground plane; optional fixed collider. */
+  /** One copy of an asset, with its colliders. */
+  private placeOne(key: AssetKey, x: number, z: number, yaw = 0): THREE.Object3D {
+    const obj = instantiate(this.templates[key]);
+    obj.position.set(x, 0, z);
+    obj.rotation.y = yaw;
+    this.scene.add(obj);
+    addStaticColliders(this.R, this.world, obj);
+    return obj;
+  }
+
+  /** Many copies of an asset as instanced meshes, with colliders for each. */
+  private placeMany(key: AssetKey, placements: THREE.Matrix4[], { colliders = true, shadows = true } = {}): void {
+    if (placements.length === 0) return;
+    this.scene.add(instanceTemplate(this.templates[key], placements, shadows));
+    if (colliders) addInstanceColliders(this.R, this.world, this.templates[key], placements);
+  }
+
+  /** Box from min/max corners; optional fixed collider. */
   private box(
     x0: number, x1: number, y0: number, y1: number, z0: number, z1: number,
     color: string, opts: { collider?: boolean; shadow?: boolean; roughness?: number } = {},
@@ -108,18 +151,6 @@ export class TestMap {
           mesh.position.x, mesh.position.y, mesh.position.z,
         ),
       );
-    }
-    return mesh;
-  }
-
-  private cylinder(x: number, z: number, y0: number, height: number, radius: number, color: string, collider = false) {
-    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, height, 10), mat(color));
-    mesh.position.set(x, y0 + height / 2, z);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    this.scene.add(mesh);
-    if (collider) {
-      this.world.createCollider(this.R.ColliderDesc.cylinder(height / 2, radius).setTranslation(x, y0 + height / 2, z));
     }
     return mesh;
   }
@@ -169,12 +200,10 @@ export class TestMap {
     // Sidewalks with real 15 cm curbs (wheels bump over them).
     const walk = (x0: number, x1: number, z0: number, z1: number) =>
       this.box(x0, x1, 0, 0.15, z0, z1, COLORS.sidewalk, { collider: true, shadow: false });
-    // Inner ring around the courthouse lawn.
     walk(-55.5, 55.5, -35.5, -32.5);
     walk(-55.5, 55.5, 32.5, 35.5);
     walk(-55.5, -52.5, -32.5, 32.5);
     walk(52.5, 55.5, -32.5, 32.5);
-    // Outer ring in front of the storefronts, with gaps for the exits.
     walk(-67.5, -4.5, -47.5, -44.5);
     walk(4.5, 67.5, -47.5, -44.5);
     walk(-67.5, 67.5, 44.5, 47.5);
@@ -186,77 +215,39 @@ export class TestMap {
   private square(): void {
     // Lawn, slightly below the sidewalk so the curb reads.
     this.box(-52.5, 52.5, 0, 0.1, -32.5, 32.5, COLORS.lawn, { collider: true, shadow: false });
+    // Bascom County Courthouse, portico facing south.
+    this.placeOne('courthouse', 0, 0, 0);
+    this.buildingCount++;
 
-    // Bascom County Courthouse: main block, portico, clock tower.
-    const c = COLORS.courthouse;
-    this.box(-17, 17, 0, 14, -11, 11, c, { collider: true });
-    this.box(-18, 18, 14, 15, -12, 12, c);                       // cornice
-    this.box(-8, 8, 0, 1.2, 11, 16, c, { collider: true });      // steps
-    for (let i = 0; i < 6; i++) this.cylinder(-6.5 + i * 2.6, 14.5, 1.2, 10.5, 0.55, c, true);
-    this.box(-8, 8, 11.7, 13.4, 11, 15.5, c);                    // portico beam
-    const gable = new THREE.Shape([new THREE.Vector2(-8.6, 0), new THREE.Vector2(8.6, 0), new THREE.Vector2(0, 3)]);
-    const pediment = new THREE.Mesh(new THREE.ExtrudeGeometry(gable, { depth: 4.5, bevelEnabled: false }), mat(c));
-    pediment.position.set(0, 13.4, 11);
-    pediment.castShadow = true;
-    this.scene.add(pediment);
-    this.box(-4, 4, 15, 27, -4, 4, c, { collider: true });       // tower
-    for (const [x, z, ry] of [[0, 4.02, 0], [0, -4.02, Math.PI], [4.02, 0, Math.PI / 2], [-4.02, 0, -Math.PI / 2]]) {
-      const face = new THREE.Mesh(new THREE.CircleGeometry(2.2, 24), mat('#f6f2e6', 0.5));
-      face.position.set(x, 23, z);
-      face.rotation.y = ry;
-      this.scene.add(face);
-    }
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(6, 6, 4), mat(COLORS.courthouseRoof));
-    roof.position.set(0, 30, 0);
-    roof.rotation.y = Math.PI / 4;
-    roof.castShadow = true;
-    this.scene.add(roof);
-
-    // Live oaks on the lawn.
-    const trees: [number, number][] = [
+    // Live oaks on the lawn, varied by rotation and size.
+    const spots: [number, number][] = [
       [-40, -24], [-26, -26], [26, -26], [40, -24], [-44, 0], [44, 0],
-      [-40, 24], [-26, 26], [26, 26], [40, 24], [-30, 12], [30, -12],
+      [-40, 24], [-24, 26], [24, 26], [40, 24], [-31, 10], [31, -10],
     ];
-    for (const [x, z] of trees) this.tree(x, z, 1);
+    const rand = seededRandom(17);
+    const oaks: Record<'oakA' | 'oakB', THREE.Matrix4[]> = { oakA: [], oakB: [] };
+    spots.forEach(([x, z], i) => {
+      oaks[i % 2 === 0 ? 'oakA' : 'oakB'].push(placementMatrix(x, 0.1, z, rand() * Math.PI * 2, 0.9 + rand() * 0.25));
+    });
+    this.placeMany('oakA', oaks.oakA);
+    this.placeMany('oakB', oaks.oakB);
   }
 
-  private tree(x: number, z: number, scale: number): void {
-    this.cylinder(x, z, 0, 4 * scale, 0.35 * scale, COLORS.trunk, true);
-    const canopy = new THREE.Mesh(new THREE.IcosahedronGeometry(3.6 * scale, 1), mat(COLORS.canopy));
-    canopy.position.set(x, 6 * scale, z);
-    canopy.scale.set(1.25, 0.8, 1.25);
-    canopy.castShadow = true;
-    canopy.receiveShadow = true;
-    this.scene.add(canopy);
-  }
-
-  private async downtownRows(): Promise<void> {
-    const templates = Object.fromEntries(
-      await Promise.all(
-        Object.entries(BUILDING_MODELS).map(async ([k, url]) => [k, await loadTemplate(url)] as const),
-      ),
-    ) as Record<keyof typeof BUILDING_MODELS, THREE.Group>;
-
+  private downtownRows(): void {
+    const placements: Record<(typeof ROW_PATTERN)[number], THREE.Matrix4[]> = { storeA: [], storeB: [], storeC: [], storeD: [] };
     let pattern = 0;
-    const place = (along: number, line: number, axis: 'x' | 'z', yaw: number, key: keyof typeof BUILDING_MODELS) => {
-      const b = instantiate(templates[key]);
-      if (axis === 'x') b.position.set(along, 0, line);
-      else b.position.set(line, 0, along);
-      b.rotation.y = yaw;
-      this.scene.add(b);
-      addStaticColliders(this.R, this.world, b);
-      this.buildingCount++;
-    };
     /** Fill [from, to] along one street edge with storefronts, facades on `line`. */
     const row = (from: number, to: number, line: number, axis: 'x' | 'z', yaw: number) => {
       let cursor = from;
       for (;;) {
         const key = ROW_PATTERN[pattern % ROW_PATTERN.length];
-        const w = BUILDING_WIDTH[key];
+        const w = STORE_WIDTH[key];
         if (cursor + w > to) break;
-        place(cursor + w / 2, line, axis, yaw, key);
+        const along = cursor + w / 2;
+        placements[key].push(axis === 'x' ? placementMatrix(along, 0, line, yaw) : placementMatrix(line, 0, along, yaw));
         cursor += w;
         pattern++;
+        this.buildingCount++;
       }
     };
     // Facades face the square: north row faces +Z (yaw 0), south row -Z,
@@ -267,14 +258,15 @@ export class TestMap {
     row(-44, 44, 67.5, 'z', -Math.PI / 2);
     row(-44, -5, -67.5, 'z', Math.PI / 2);
     row(5, 44, -67.5, 'z', Math.PI / 2);
+    for (const key of Object.keys(placements) as (keyof typeof placements)[]) this.placeMany(key, placements[key]);
   }
 
   private westOutskirts(): void {
-    // Red clay county road with a jump at the end.
+    // Red clay county road with a turnaround and a jump.
     this.box(-440, -130, 0, 0.025, -4, 4, COLORS.clay, { shadow: false, roughness: 1 });
     this.box(-470, -440, 0, 0.025, -30, 30, COLORS.clay, { shadow: false, roughness: 1 });
 
-    const ramp = this.box(-6, 6, -0.3, 0.3, -4, 4, '#7a6a55');
+    const ramp = this.box(-6, 6, -0.3, 0.3, -4, 4, COLORS.ramp);
     const angle = 0.22;
     ramp.position.set(-360, 6 * Math.sin(angle) - 0.25, 0);
     ramp.rotation.z = -angle; // rises toward -X, the direction you drive out of town
@@ -285,27 +277,17 @@ export class TestMap {
         .setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }),
     );
 
-    // Power poles along the county road.
-    for (let x = -140; x > -440; x -= 40) {
-      this.cylinder(x, 9, 0, 10, 0.16, COLORS.pole, true);
-      this.box(x - 0.1, x + 0.1, 9.0, 9.2, 7.6, 10.4, COLORS.pole, { shadow: true });
-    }
+    // Power line along the county road. The pole's crossarm is across its
+    // local X, so yaw 90° runs the wires along the road (world X).
+    const poles: THREE.Matrix4[] = [];
+    for (let x = -140; x >= -440; x -= 40) poles.push(placementMatrix(x, 0, 9, Math.PI / 2));
+    this.placeMany('pole', poles);
+    const wires = poles.map((p) => markerPositions(this.templates.pole, 'WIRE_', p));
+    this.scene.add(buildPowerLines(wires));
 
-    // Pine stands along the road.
-    for (let i = 0; i < 40; i++) {
-      const x = -150 - ((i * 53) % 280);
-      const side = i % 2 === 0 ? 1 : -1;
-      const z = side * (18 + ((i * 37) % 60));
-      this.pine(x, z, 0.8 + ((i * 7) % 5) * 0.12);
-    }
-
-    // Water tower.
-    for (const [dx, dz] of [[-4, -4], [4, -4], [-4, 4], [4, 4]]) this.cylinder(-150 + dx, -90 + dz, 0, 26, 0.4, COLORS.tower, true);
-    this.cylinder(-150, -90, 26, 9, 7, COLORS.tower);
-    const cap = new THREE.Mesh(new THREE.ConeGeometry(7.2, 3, 20), mat(COLORS.tower));
-    cap.position.set(-150, 36.5, -90);
-    cap.castShadow = true;
-    this.scene.add(cap);
+    // The water tower, lettering turned toward the square.
+    this.placeOne('waterTower', -150, -90, Math.atan2(150, 90));
+    this.buildingCount++;
 
     // A stack of SaveMore boxes to drive through.
     const size = 0.9;
@@ -316,12 +298,26 @@ export class TestMap {
     }
   }
 
-  private pine(x: number, z: number, s: number): void {
-    this.cylinder(x, z, 0, 9 * s, 0.25 * s, COLORS.trunk, true);
-    const crown = new THREE.Mesh(new THREE.ConeGeometry(2.6 * s, 9 * s, 7), mat('#34502b'));
-    crown.position.set(x, 11 * s, z);
-    crown.castShadow = true;
-    this.scene.add(crown);
+  /** Loblolly pine woods around town (seeded, so the same on every load). */
+  private woods(): void {
+    const rand = seededRandom(42);
+    const pines: Record<'pineA' | 'pineB', THREE.Matrix4[]> = { pineA: [], pineB: [] };
+    const scatter = (count: number, x0: number, x1: number, z0: number, z1: number) => {
+      for (let placed = 0, tries = 0; placed < count && tries < count * 10; tries++) {
+        const x = x0 + rand() * (x1 - x0);
+        const z = z0 + rand() * (z1 - z0);
+        if (inClearing(x, z)) continue;
+        const key = rand() < 0.5 ? 'pineA' : 'pineB';
+        pines[key].push(placementMatrix(x, 0, z, rand() * Math.PI * 2, 0.85 + rand() * 0.35));
+        placed++;
+      }
+    };
+    scatter(110, -470, -135, -140, 140);   // along the county road
+    scatter(70, 110, 320, -260, 260);      // east of downtown
+    scatter(60, -130, 130, 90, 300);       // south of downtown
+    scatter(40, -330, -110, -260, -150);   // northwest
+    this.placeMany('pineA', pines.pineA);
+    this.placeMany('pineB', pines.pineB);
   }
 
   private crate(x: number, y: number, z: number, size: number): void {
@@ -331,32 +327,31 @@ export class TestMap {
     this.scene.add(mesh);
     const body = this.world.createRigidBody(this.R.RigidBodyDesc.dynamic().setTranslation(x, y, z));
     this.world.createCollider(this.R.ColliderDesc.cuboid(size / 2, size / 2, size / 2).setDensity(60), body);
-    this.props.push({ sync: new BodySync(body, mesh) });
+    this.props.push(new BodySync(body, mesh));
   }
 
   private northToSaveMore(): void {
-    // SaveMore Supercenter placeholder at the top of the north road.
-    this.box(-90, 90, 0, 0.035, -330, -210, COLORS.asphaltLot, { shadow: false });
-    for (let x = -84; x <= 84; x += 6) this.box(x - 0.06, x + 0.06, 0.035, 0.04, -300, -290, '#e8e4d8', { shadow: false });
-    this.box(-70, 70, 0, 11, -400, -330, COLORS.saveMore, { collider: true });
-    this.box(-70.2, 70.2, 8, 11, -330.2, -329.8, COLORS.saveMoreBand);
-    this.box(-14, 14, 0, 4, -330.4, -329.9, '#2b3640');                // entrance glass
+    // Parking lot with striped stalls, then the store with its facade facing the lot.
+    this.box(-95, 95, 0, 0.035, -322, -210, COLORS.asphaltLot, { shadow: false });
+    const stripes: THREE.Matrix4[] = [];
+    for (const z of [-300, -270, -240]) {
+      for (let x = -84; x <= 84; x += 3) {
+        if (Math.abs(x) >= 6) stripes.push(placementMatrix(x, 0.0375, z)); // skip the drive aisle
+      }
+    }
+    const stripe = new THREE.InstancedMesh(new THREE.BoxGeometry(0.12, 0.005, 10), mat(COLORS.stall), stripes.length);
+    stripes.forEach((m, i) => stripe.setMatrixAt(i, m));
+    stripe.computeBoundingSphere();
+    stripe.receiveShadow = true;
+    this.scene.add(stripe);
+    this.placeOne('saveMore', 0, -330, 0);
+    this.buildingCount++;
   }
 
   private skyline(): void {
-    // Port Meridian on the northeast horizon: silhouettes only, no shadows or physics.
+    // Port Meridian on the northeast horizon: a silhouette in the haze, no physics.
     const dir = new THREE.Vector3(0.62, 0, -0.78).normalize();
-    const side = new THREE.Vector3(-dir.z, 0, dir.x);
-    const center = dir.clone().multiplyScalar(1750);
-    for (let i = 0; i < 34; i++) {
-      const t = (i / 33 - 0.5) * 520;
-      const h = 30 + ((i * 97) % 11) * 12 + (Math.abs(t) < 90 ? 70 : 0) + (i === 17 ? 60 : 0);
-      const w = 18 + ((i * 31) % 4) * 8;
-      const p = center.clone().addScaledVector(side, t).addScaledVector(dir, ((i * 41) % 5) * 30);
-      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), mat(COLORS.skyline, 0.8));
-      mesh.position.set(p.x, h / 2, p.z);
-      mesh.lookAt(p.x - dir.x, h / 2, p.z - dir.z);
-      this.scene.add(mesh);
-    }
+    const at = dir.clone().multiplyScalar(1750);
+    this.placeMany('skyline', [placementMatrix(at.x, 0, at.z, Math.atan2(-dir.x, -dir.z))], { colliders: false, shadows: false });
   }
 }

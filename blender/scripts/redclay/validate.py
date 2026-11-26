@@ -11,7 +11,7 @@ import bpy
 from .common import triangle_count
 
 PREFIXES = ("BLD_", "KIT_", "PRP_", "RD_", "FOL_", "VEH_", "WPN_", "CHR_", "SKY_", "CELL_")
-MARKERS = ("WHEEL_", "SPAWN_PED_", "SPAWN_CAR_", "DOOR_", "MISSION_", "SAFEHOUSE_")
+MARKERS = ("WHEEL_", "JOINT_", "WIRE_", "SPAWN_PED_", "SPAWN_CAR_", "DOOR_", "MISSION_", "SAFEHOUSE_")
 SUFFIX_RE = re.compile(r"-(colonly|convcolonly|col|nav|lod\d|noexp)$")
 COLLIDER_SHAPES = {"box", "sphere", "capsule", "convex", "trimesh"}
 WHEELS = ("WHEEL_FL", "WHEEL_FR", "WHEEL_RL", "WHEEL_RR")
@@ -26,6 +26,9 @@ TRI_BUDGET = {
     "PRP_": 1500,
     "FOL_": 2000,
 }
+# Buildings flagged with the custom property landmark=True (courthouse, water
+# tower, SaveMore) get the larger landmark budget from the docs.
+LANDMARK_BUDGET = 12000
 
 
 class ValidationError(Exception):
@@ -67,6 +70,8 @@ def validate_scene(kind=None):
             continue
 
         for prefix, budget in TRI_BUDGET.items():
+            if prefix == "BLD_" and obj.get("landmark"):
+                budget = LANDMARK_BUDGET
             if base.startswith(prefix):
                 tris = triangle_count(obj)
                 if tris > budget:

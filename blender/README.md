@@ -8,14 +8,25 @@ scripts/
   generators/   gen_*.py: each builds assets from code and exports .glb
   redclay/      Shared helpers (materials, box builder, export) and validation rules
   validate.py   Validate a hand-made .blend against the pipeline rules
+  preview.py    Render preview images of exported assets (Cycles, CPU)
 src/            Hand-authored .blend files (Git LFS)
 ```
+
+Generators today: storefronts (4 variants), courthouse, SaveMore, water tower,
+live oaks and loblolly pines, power pole, Port Meridian skyline, the work
+pickup, and Trip (blockout).
 
 Build every scripted asset (runs all generators headless, validates,
 compresses into `game/public/assets/`):
 
 ```bash
 cd game && npm run assets
+```
+
+Preview assets (after `npm run assets`, or point it at any .glb):
+
+```bash
+blender -b --factory-startup -P blender/scripts/preview.py -- preview.png game/public/assets/buildings/BLD_Courthouse.glb
 ```
 
 Validate a hand-made file:

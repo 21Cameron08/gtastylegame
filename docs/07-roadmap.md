@@ -8,10 +8,13 @@ actually move.
 Set up the tools so everything after this is fast.
 
 Done so far: web project, game loop, input, drivable pickup (Rapier ray-cast
-vehicle), chase camera, greybox courthouse square, two Blender generators
-(storefronts, pickup) with validation and compression, unit and browser tests,
-CI with GitHub Pages deploy. Remaining: cell manifest export, road-network
-authoring prototype, settings skeleton.
+vehicle), chase camera, unit and browser tests, CI with GitHub Pages deploy.
+Blender generators for every landmark and prop in the test map (storefronts,
+courthouse, SaveMore, water tower, oaks, pines, power poles, skyline, pickup,
+Trip), with validation, compression, instancing, and preview renders.
+Pulled forward from M1: walking (kinematic character controller, mouse-look
+orbit camera, procedural walk cycle) and getting in and out of the truck.
+Remaining: cell manifest export, road-network authoring prototype, settings skeleton.
 
 Scope:
 - Vite + TypeScript + Three.js + Rapier project with a test scene

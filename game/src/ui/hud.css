@@ -107,3 +107,26 @@ body {
   font-family: ui-monospace, monospace;
   font-size: 13px;
 }
+
+.hud-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 64px;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 6px;
+  background: rgb(20 18 16 / 0.55);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-shadow: none;
+  white-space: pre;
+}
+
+.hud-hint {
+  position: absolute;
+  top: 46px;
+  right: 20px;
+  font-size: 13px;
+  opacity: 0.85;
+}

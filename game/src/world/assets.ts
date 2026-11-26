@@ -41,24 +41,20 @@ const tmpSize = new THREE.Vector3();
 const tmpCenter = new THREE.Vector3();
 
 /**
- * Collider for one mesh, in world space (or in `relativeTo`'s space). Uses the
+ * Collider for one mesh, in world space (or at `worldMatrix`, for instances). Uses the
  * geometry's own bounds plus the object's transform, so it stays correct for
  * rotated placements and for compressed (quantized) meshes.
  */
 export function colliderDescFor(
   R: Rapier,
   mesh: THREE.Mesh,
-  relativeTo?: THREE.Object3D,
+  worldMatrix?: THREE.Matrix4,
 ): RAPIER.ColliderDesc | null {
   const shape = colliderShapeFor(mesh.name, mesh.userData);
   if (!shape) return null;
 
-  mesh.updateWorldMatrix(true, false);
-  const matrix = mesh.matrixWorld.clone();
-  if (relativeTo) {
-    relativeTo.updateWorldMatrix(true, false);
-    matrix.premultiply(relativeTo.matrixWorld.clone().invert());
-  }
+  if (!worldMatrix) mesh.updateWorldMatrix(true, false);
+  const matrix = (worldMatrix ?? mesh.matrixWorld).clone();
   matrix.decompose(tmpPos, tmpQuat, tmpScale);
 
   const geo = mesh.geometry;

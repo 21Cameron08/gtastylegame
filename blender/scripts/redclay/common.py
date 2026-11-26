@@ -5,11 +5,14 @@ Conventions (see docs/06-blender-pipeline.md):
 - Collision-only objects end in "-colonly" and carry a "collider" custom property.
 """
 
+import math
 import os
+import random
 import sys
 
 import bmesh
 import bpy
+from mathutils import Matrix, Vector
 
 
 def parse_args():
@@ -99,7 +102,65 @@ class MeshBuilder:
             face = bm.faces.new(f)
             face.material_index = idx
 
-    def to_object(self, name):
+    def cylinder(self, r0, r1, length, mat, segments=12, matrix=None, cap=True):
+        """Cylinder or cone along local +Z from 0 to `length`, then moved by `matrix`."""
+        m = matrix or Matrix()
+        bm = self.bm
+        idx = self._mat_index(mat)
+        rings = []
+        for z, r in ((0.0, r0), (length, r1)):
+            ring = []
+            for i in range(segments):
+                a = 2 * math.pi * i / segments
+                ring.append(bm.verts.new(m @ Vector((r * math.cos(a), r * math.sin(a), z))))
+            rings.append(ring)
+        b, t = rings
+        for i in range(segments):
+            j = (i + 1) % segments
+            bm.faces.new((b[i], b[j], t[j], t[i])).material_index = idx
+        if cap:
+            bm.faces.new(list(reversed(b))).material_index = idx
+            if r1 > 1e-4:
+                bm.faces.new(t).material_index = idx
+
+    def vcyl(self, x, y, z0, z1, r0, mat, r1=None, segments=12):
+        """Vertical cylinder (or tapered) standing at (x, y) from z0 to z1."""
+        self.cylinder(r0, r0 if r1 is None else r1, z1 - z0, mat, segments, Matrix.Translation((x, y, z0)))
+
+    def blob(self, center, radius, mat, scale=(1, 1, 1), jitter=0.12, seed=0, subdivisions=1):
+        """Lumpy icosphere for foliage clumps; deterministic for a given seed."""
+        rng = random.Random(seed)
+        m = Matrix.Translation(center) @ Matrix.Diagonal((*scale, 1.0)) @ Matrix.Scale(radius, 4)
+        ret = bmesh.ops.create_icosphere(self.bm, subdivisions=subdivisions, radius=1.0, matrix=m)
+        verts = ret["verts"]
+        c = Vector(center)
+        for v in verts:
+            v.co = c + (v.co - c) * (1.0 + rng.uniform(-jitter, jitter))
+        idx = self._mat_index(mat)
+        for f in {f for v in verts for f in v.link_faces}:
+            f.material_index = idx
+
+    def add_mesh(self, mesh, mat, fn):
+        """Append another mesh datablock, mapping every vertex through fn(Vector) -> Vector."""
+        tmp = bmesh.new()
+        tmp.from_mesh(mesh)
+        for v in tmp.verts:
+            v.co = fn(v.co.copy())
+        tmp_mesh = bpy.data.meshes.new("_tmp")
+        tmp.to_mesh(tmp_mesh)
+        tmp.free()
+        first = len(self.bm.faces)
+        self.bm.from_mesh(tmp_mesh)
+        self.bm.faces.ensure_lookup_table()
+        idx = self._mat_index(mat)
+        for i in range(first, len(self.bm.faces)):
+            self.bm.faces[i].material_index = idx
+        bpy.data.meshes.remove(tmp_mesh)
+
+    def to_object(self, name, origin=None, parent=None):
+        """Create the object. With `origin`, the object's origin sits there (e.g. a joint)."""
+        if origin is not None:
+            bmesh.ops.translate(self.bm, verts=self.bm.verts, vec=-Vector(origin))
         mesh = bpy.data.meshes.new(name)
         bmesh.ops.recalc_face_normals(self.bm, faces=self.bm.faces)
         self.bm.to_mesh(mesh)
@@ -108,16 +169,78 @@ class MeshBuilder:
             mesh.materials.append(mat)
         obj = bpy.data.objects.new(name, mesh)
         bpy.context.scene.collection.objects.link(obj)
+        if origin is not None:
+            obj.location = origin
+        if parent is not None:
+            attach(obj, parent)
         return obj
 
 
-def collider_box(name, x0, x1, y0, y1, z0, z1):
-    """Invisible box collider: name must end in '-colonly'."""
+def empty(name, location, parent=None):
+    """Empty object, used for joints (JOINT_*) and attachment markers (WIRE_*, SPAWN_*)."""
+    obj = bpy.data.objects.new(name, None)
+    obj.empty_display_type = "PLAIN_AXES"
+    bpy.context.scene.collection.objects.link(obj)
+    obj.location = location
+    if parent is not None:
+        attach(obj, parent)
+    return obj
+
+
+def attach(child, parent):
+    """Parent `child` to `parent`, keeping the child's world position (no rotation/scale involved)."""
+    world = Vector(child.location)
+    child.parent = parent
+    child.matrix_parent_inverse = Matrix()
+    child.location = world - world_location(parent)
+
+
+def world_location(obj):
+    loc = Vector(obj.location)
+    p = obj.parent
+    while p is not None:
+        loc += Vector(p.location)
+        p = p.parent
+    return loc
+
+
+def text_mesh(body, size, extrude, align_x="CENTER", resolution=3):
+    """Convert text in Blender's built-in font to a mesh datablock lying in the XY plane, facing +Z.
+
+    `resolution` is curve segments per letter outline span; low keeps triangle counts down.
+    """
+    curve = bpy.data.curves.new("_txt", type="FONT")
+    curve.resolution_u = resolution
+    curve.body = body
+    curve.size = size
+    curve.extrude = extrude
+    curve.align_x = align_x
+    curve.align_y = "BOTTOM_BASELINE"
+    obj = bpy.data.objects.new("_txt", curve)
+    bpy.context.scene.collection.objects.link(obj)
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    mesh = bpy.data.meshes.new_from_object(obj.evaluated_get(depsgraph))
+    bpy.data.objects.remove(obj)
+    bpy.data.curves.remove(curve)
+    return mesh
+
+
+def mesh_bounds(mesh):
+    xs = [v.co.x for v in mesh.vertices]
+    ys = [v.co.y for v in mesh.vertices]
+    return min(xs), max(xs), min(ys), max(ys)
+
+
+def collider_box(name, x0, x1, y0, y1, z0, z1, shape="box"):
+    """Invisible collider sized by a box: name must end in '-colonly'.
+
+    shape="capsule" or "sphere" makes the game fit that shape to the box.
+    """
     assert name.endswith("-colonly"), name
     b = MeshBuilder()
     b.box(x0, x1, y0, y1, z0, z1, material("MAT_Collider", "#ff00ff"))
     obj = b.to_object(name)
-    obj["collider"] = "box"
+    obj["collider"] = shape
     return obj
 
 

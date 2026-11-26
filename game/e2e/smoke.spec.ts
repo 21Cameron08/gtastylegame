@@ -1,20 +1,25 @@
 import { writeFileSync } from 'node:fs';
 import { expect, type Page, test } from '@playwright/test';
 
+type Vec = { x: number; y: number; z: number };
 interface GameHooks {
   ready: boolean;
   error: string | null;
   backend: string | null;
   frames: number;
-  vehicle: { x: number; y: number; z: number; speedMph: number } | null;
+  mode: 'foot' | 'vehicle' | null;
+  player: Vec | null;
+  vehicle: (Vec & { speedMph: number }) | null;
   capture: (width?: number, height?: number) => Promise<string>;
 }
 
 const hooks = (page: Page) =>
   page.evaluate(() => {
     const g = (window as unknown as { __game: GameHooks }).__game;
-    return { ready: g.ready, error: g.error, backend: g.backend, frames: g.frames, vehicle: g.vehicle };
+    return { ready: g.ready, error: g.error, backend: g.backend, frames: g.frames, mode: g.mode, player: g.player, vehicle: g.vehicle };
   });
+
+const dist = (a: Vec, b: Vec) => Math.hypot(a.x - b.x, a.z - b.z);
 
 /** Boot the game and collect console errors and uncaught exceptions. */
 async function boot(page: Page, query = '') {
@@ -89,7 +94,7 @@ for (const [label, query] of [
   ['default renderer', ''],
   ['forced WebGL 2 fallback', '?renderer=webgl'],
 ] as const) {
-  test(`boots, renders, and drives (${label})`, async ({ page }, info) => {
+  test(`boots, walks, gets in, drives, and gets out (${label})`, async ({ page }, info) => {
     const errors = await boot(page, query);
     const start = await hooks(page);
     if (query) expect(start.backend).toBe('WebGL 2');
@@ -99,21 +104,40 @@ for (const [label, query] of [
     const pixels = canReadPixels(start.backend);
     if (pixels) expect(await captureFrame(page, info.outputPath('spawn.png'))).toBeGreaterThan(20);
 
-    // Hold the throttle until the truck has covered some ground. Polling instead of
-    // a fixed wait keeps this independent of frame rate (software rendering is slow).
-    const before = start.vehicle!;
-    const moved = async () => {
-      const v = (await hooks(page)).vehicle!;
-      return Math.hypot(v.x - before.x, v.z - before.z);
-    };
+    // Every step polls game state instead of waiting a fixed time, so the test is
+    // independent of frame rate (software rendering is slow).
+    const poll = (fn: () => Promise<unknown>) => expect.poll(fn, { timeout: 90_000 });
+    expect(start.mode).toBe('foot');
+
+    // Get in the truck parked beside the spawn.
+    await page.keyboard.press('KeyF');
+    await poll(async () => (await hooks(page)).mode).toBe('vehicle');
+
+    // Drive until the truck has covered some ground.
+    const parked = start.vehicle!;
     await page.keyboard.down('KeyW');
-    await expect.poll(moved, { timeout: 90_000 }).toBeGreaterThan(4);
+    await poll(async () => dist((await hooks(page)).vehicle!, parked)).toBeGreaterThan(4);
     await page.keyboard.up('KeyW');
     if (pixels) await captureFrame(page, info.outputPath('driving.png'));
 
+    // Brake to a near stop, then get out.
+    await page.keyboard.down('KeyS');
+    await poll(async () => (await hooks(page)).vehicle!.speedMph).toBeLessThan(4);
+    await page.keyboard.up('KeyS');
+    await page.keyboard.press('KeyF');
+    await poll(async () => (await hooks(page)).mode).toBe('foot');
+
+    // Walk away from the truck.
+    const exitSpot = (await hooks(page)).player!;
+    await page.keyboard.down('KeyW');
+    await poll(async () => dist((await hooks(page)).player!, exitSpot)).toBeGreaterThan(2);
+    await page.keyboard.up('KeyW');
+    if (pixels) await captureFrame(page, info.outputPath('walking.png'));
+
     const end = await hooks(page);
-    console.log(`[${label}] backend=${end.backend} frames=${end.frames} moved=${(await moved()).toFixed(1)}m`);
-    expect(end.vehicle!.y).toBeGreaterThan(-1); // didn't fall through the world
+    console.log(`[${label}] backend=${end.backend} frames=${end.frames} drove=${dist(end.vehicle!, parked).toFixed(1)}m`);
+    expect(end.vehicle!.y).toBeGreaterThan(-1); // nothing fell through the world
+    expect(end.player!.y).toBeGreaterThan(0.5);
     expect(realErrors(errors, end.backend)).toEqual([]);
   });
 }

@@ -95,6 +95,7 @@ Blender custom properties export as glTF "extras" and arrive in Three.js as
 | `surface` | `asphalt`, `dirt`, `grass`, `mud`, `gravel`, `wood`: tire grip, footsteps, particles |
 | `night_emissive` | Materials that light up at night (neon, windows, streetlights) |
 | `interact` | Interaction ID (shop door, ATM, vending machine) |
+| `landmark` | `True` on a building that gets the 12k landmark triangle budget |
 
 ## Gameplay markers (Blender as level editor)
 
@@ -102,6 +103,8 @@ Empties placed in a cell become gameplay markers:
 
 | Empty name | Meaning |
 | --- | --- |
+| `JOINT_*` | Pivot for a moving part (character limbs); meshes hang under it |
+| `WIRE_*` | Power-line attachment point on a pole |
 | `SPAWN_PED_*` | Pedestrian spawn area |
 | `SPAWN_CAR_*` | Parked or traffic vehicle spawn |
 | `DOOR_*` | Enterable interior or shop entrance |
@@ -159,9 +162,32 @@ The validator flags anything over budget.
   positions and writes them into the vehicle definition for Rapier's vehicle controller.
 - A simple `-colonly` convex hull for the chassis.
 
+## Pivots must be empties
+
+Compression (quantization) rewrites each mesh's origin to its bounding-box
+center. Anything that rotates around a specific point (a hip, a door hinge)
+therefore needs an **empty at the pivot** with the mesh parented under it;
+empties are left alone. Wheels are the exception: the game re-centers them on
+their measured hubs.
+
+## Text and signage
+
+Generators can turn text into geometry with Blender's built-in font
+(`text_mesh()` in `redclay/common.py`): the SaveMore logotype and GROCERY sign
+are flat text on the facade; CANE CREEK is wrapped around the water tank.
+Keep the curve resolution low; text is the biggest triangle cost in a sign.
+
+## Previews
+
+`blender/scripts/preview.py` renders any exported `.glb` (or several side by
+side) to a PNG with Cycles on the CPU, so assets can be reviewed without
+running the game.
+
 ## Characters & animation
 
-- One shared humanoid skeleton for every character, so all animations work on everyone.
+- **Now**: Trip is a jointed blockout (`JOINT_Spine`, `JOINT_Head`,
+  `JOINT_LegL/R`, `JOINT_ArmL/R`) animated procedurally in the game.
+- **Later**: one shared humanoid skeleton for every character, so all animations work on everyone.
 - Placeholder animations from Mixamo or CC0 packs until custom animation exists.
 - Clothes as separate meshes on the same skeleton (swappable outfits for shops).
 
